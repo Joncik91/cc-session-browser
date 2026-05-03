@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0E0E0F">
+<meta name="color-scheme" content="dark">
+<meta name="format-detection" content="telephone=no">
+<title>history-browser</title>
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+
+<div class="app">
+
+  <header class="hero">
+    <div class="hero-inner">
+      <div class="search-box">
+        <span class="glyph" aria-hidden="true">⌕</span>
+        <input
+          id="search"
+          class="search-input"
+          type="search"
+          placeholder="search sessions… (project, prompt fragment, file path)"
+          autocomplete="off"
+          autocorrect="off"
+          autocapitalize="off"
+          spellcheck="false"
+          aria-label="search">
+        <button id="search-clear" class="search-clear" type="button" hidden>clear</button>
+      </div>
+
+      <div class="meta-strip">
+        <span class="count"><strong id="result-count">…</strong> sessions</span>
+
+        <label class="filter-chip" data-filter="today">today</label>
+        <label class="filter-chip" data-filter="week">this week</label>
+        <label class="filter-chip" data-filter="long">long</label>
+        <label class="filter-chip" data-filter="errored">errored</label>
+        <label class="filter-chip" data-filter="full">full-text</label>
+
+        <select id="sort" class="sort-select spacer" aria-label="sort">
+          <option value="recent">recent</option>
+          <option value="longest">longest</option>
+        </select>
+      </div>
+    </div>
+  </header>
+
+  <main class="main">
+    <div id="list" class="list-pane"><div class="placeholder">loading…</div></div>
+    <aside id="detail" class="detail-pane empty"></aside>
+  </main>
+
+</div>
+
+<div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

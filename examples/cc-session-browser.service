@@ -1,0 +1,21 @@
+[Unit]
+Description=cc-session-browser — Claude Code session search/resume UI
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/cc-session-browser
+Environment=HOME=/root
+# Add your LAN / Tailscale / hostnames as comma-separated entries here.
+# Default (loopback only) is safe but means the UI is only reachable from
+# the host running it. To reach it from a phone over Tailscale, add the
+# tailnet URL here AND switch --host below to 0.0.0.0.
+Environment=ALLOWED_ORIGINS=http://127.0.0.1:8766,http://localhost:8766
+ExecStart=/opt/cc-session-browser/.venv/bin/uvicorn server:app \
+  --host 127.0.0.1 --port 8766 --log-level warning
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
