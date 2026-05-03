@@ -281,8 +281,15 @@ class View {
     proj.appendChild(document.createTextNode(s.proj || '~'));
     if (s.branch) proj.appendChild(el('span', { class: 'branch', text: '· ' + s.branch }));
     const head = el('span', { class: 'head' }, [time, proj]);
-    const topic = el('span', { class: 'topic', title: s.topic });
-    topic.appendChild(highlight(s.topic || '', terms));
+    // Row preview shows the LAST assistant output (where the session left off)
+    // rather than the first user prompt — better signal for "should I resume
+    // this?" Falls back to topic-derived snippet when last_text_preview is
+    // empty (rare: tool-only sessions, or transcripts without text blocks).
+    const previewText = (s.last_text_preview && s.last_text_preview.trim())
+      ? s.last_text_preview
+      : (s.topic || '');
+    const topic = el('span', { class: 'topic', title: previewText });
+    topic.appendChild(highlight(previewText, terms));
     const dur = el('span', { class: 'dur', text: s.duration });
 
     const row = el('div', {

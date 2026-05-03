@@ -132,6 +132,12 @@ def scan_transcript(proj_path: str, sid: str) -> dict:
     files_touched: set[str] = set()
     in_tok = out_tok = 0
     transcript_chunks: list[str] = []
+    # Last assistant text block — the closing reply the user actually reads.
+    # Overwritten as we walk forward; final value at EOF is the answer to
+    # "where did this session leave off." Tool-only assistant turns (no text
+    # block at all) don't reset this — we only update when a non-empty text
+    # block is found.
+    last_assistant_text = ""
 
     try:
         with p.open() as f:
@@ -142,7 +148,18 @@ def scan_transcript(proj_path: str, sid: str) -> dict:
                     continue
                 # tool calls live in assistant message content blocks of type tool_use
                 msg = rec.get("message") or {}
+                role = msg.get("role")
                 content = msg.get("content")
+                # Track the last NON-EMPTY assistant text block we saw.
+                if rec.get("type") == "assistant" and isinstance(content, list):
+                    found_text = ""
+                    for block in content:
+                        if isinstance(block, dict) and block.get("type") == "text":
+                            t = block.get("text") or ""
+                            if isinstance(t, str) and t.strip():
+                                found_text = t.strip()
+                    if found_text:
+                        last_assistant_text = found_text
                 if isinstance(content, list):
                     for block in content:
                         if not isinstance(block, dict):
@@ -191,6 +208,7 @@ def scan_transcript(proj_path: str, sid: str) -> dict:
         "input_tokens": in_tok,
         "output_tokens": out_tok,
         "transcript_text": "\n".join(transcript_chunks)[:200_000],  # cap memory
+        "last_assistant_text": last_assistant_text,
     }
     _transcript_cache[sid] = (mtime, summary)
     return summary
@@ -324,6 +342,10 @@ def enrich(sessions: list[dict], *, with_transcript: bool = True) -> list[dict]:
         if mtime:
             live = (now - mtime) < 60.0
         last_activity_ms = int(mtime * 1000) if mtime else (s["last_ts"] or 0)
+        # Last assistant text — truncated for the row preview. The full text
+        # is still available via /api/session/<sid> for the detail pane.
+        last_text = scan.get("last_assistant_text", "") if not scan.get("missing") else ""
+        last_text_preview = last_text[:300] if last_text else ""
         enriched.append({
             **s,
             "branch": git_branch(s["proj_path"]),
@@ -336,6 +358,7 @@ def enrich(sessions: list[dict], *, with_transcript: bool = True) -> list[dict]:
             "duration": fmt_duration(s["duration_ms"]),
             "last_activity_ms": last_activity_ms,
             "last_iso": datetime.fromtimestamp(last_activity_ms / 1000).strftime("%Y-%m-%d %H:%M") if last_activity_ms else "",
+            "last_text_preview": last_text_preview,
         })
     return enriched
 
