@@ -1,10 +1,25 @@
+<div align="center">
+
+<img src="docs/logo.svg" alt="cc-session-browser" width="160" height="160">
+
 # cc-session-browser
 
+[![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.110%2B-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-E8954A.svg)](LICENSE)
+[![Local-first](https://img.shields.io/badge/local--first-✓-58D070)](https://www.inkandswitch.com/local-first/)
+[![No build step](https://img.shields.io/badge/no%20build%20step-✓-58D070)]()
+[![Mobile-friendly](https://img.shields.io/badge/mobile-friendly-58D070)]()
+[![PRs welcome](https://img.shields.io/badge/PRs-welcome-E8954A.svg)](CONTRIBUTING.md)
+
 A local web UI to search, browse, and resume **Claude Code** sessions across all
-projects on a single dev machine. Inspired by Raycast's precision retrieval and
-a photographer's contact sheet — designed for *recognition under partial memory*
-when you've got hundreds of past sessions and need to find the right one to
-resume.
+projects on a single dev machine.
+
+</div>
+
+Inspired by Raycast's precision retrieval and a photographer's contact sheet —
+designed for *recognition under partial memory* when you've got hundreds of
+past sessions and need to find the right one to resume.
 
 ![cc-session-browser screenshot](docs/screenshot.png)
 
@@ -96,6 +111,12 @@ loopback or LAN only, or hide it behind Tailscale / WireGuard.
 The default config binds to `127.0.0.1` for this reason. Switching to
 `--host 0.0.0.0` requires explicit intent — make sure your firewall scopes the
 port to trusted networks.
+
+## Contributing
+
+PRs welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) — the codebase is
+intentionally small (no build step, single-file frontend, stdlib + FastAPI),
+which means the design philosophy matters more than usual.
 
 ## License
 

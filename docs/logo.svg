@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400" role="img" aria-label="cc-session-browser">
+  <title>cc-session-browser</title>
+
+  <!-- Field.io substrate -->
+  <rect width="400" height="400" rx="48" fill="#0E0E0F"/>
+
+  <!-- Subtle grid lines, like a contact sheet's frame edges -->
+  <g stroke="#1B1B20" stroke-width="1">
+    <line x1="60"  y1="100" x2="340" y2="100"/>
+    <line x1="60"  y1="300" x2="340" y2="300"/>
+  </g>
+
+  <!-- Three "session" frames stacked: time-grouped contact sheet metaphor.
+       Top frame is the "live / latest" — amber outline + filled dot.
+       Middle and bottom are past sessions — neutral. -->
+
+  <!-- Top frame (live) -->
+  <g transform="translate(60 116)">
+    <rect width="280" height="44" rx="6" fill="#16161A" stroke="#E8954A" stroke-width="1.5"/>
+    <circle cx="22" cy="22" r="5" fill="#58D070"/>
+    <rect x="44" y="14" width="92" height="6" rx="2" fill="#E8954A"/>
+    <rect x="44" y="26" width="186" height="5" rx="2" fill="#7A7A82"/>
+  </g>
+
+  <!-- Middle frame -->
+  <g transform="translate(60 178)">
+    <rect width="280" height="44" rx="6" fill="#131318" stroke="#232327" stroke-width="1"/>
+    <circle cx="22" cy="22" r="3" fill="#4F4F56"/>
+    <rect x="44" y="14" width="78" height="6" rx="2" fill="#7A7A82"/>
+    <rect x="44" y="26" width="160" height="5" rx="2" fill="#4F4F56"/>
+  </g>
+
+  <!-- Bottom frame -->
+  <g transform="translate(60 240)">
+    <rect width="280" height="44" rx="6" fill="#131318" stroke="#232327" stroke-width="1"/>
+    <circle cx="22" cy="22" r="3" fill="#4F4F56"/>
+    <rect x="44" y="14" width="64" height="6" rx="2" fill="#7A7A82"/>
+    <rect x="44" y="26" width="140" height="5" rx="2" fill="#4F4F56"/>
+  </g>
+
+  <!-- Search glyph in the corner — Raycast retrieval signature -->
+  <g transform="translate(308 80)" stroke="#E8954A" stroke-width="2.5" fill="none" stroke-linecap="round">
+    <circle cx="0" cy="0" r="10"/>
+    <line x1="8" y1="8" x2="16" y2="16"/>
+  </g>
+</svg>
