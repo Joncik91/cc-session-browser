@@ -311,9 +311,12 @@ def scan_transcript(proj_path: str, sid: str) -> dict:
     #   - if top entry holds ≥70% of total → only that one
     #   - else show up to 3 entries above 5% threshold
     project_filtered: list[tuple[str, int]] = []
+    orphaned_projects: list[dict] = []
     for label, edits in project_edit_counts.items():
         if label in STABLE_LABELS or project_dir_exists(label):
             project_filtered.append((label, edits))
+        else:
+            orphaned_projects.append({"name": label, "edits": edits})
     project_filtered.sort(key=lambda x: x[1], reverse=True)
     total_edits = sum(c for _, c in project_filtered)
     projects_top: list[dict] = []
@@ -337,6 +340,7 @@ def scan_transcript(proj_path: str, sid: str) -> dict:
         "cwds": cwds_sorted,
         "path_roots": roots_sorted,
         "projects": projects_top,
+        "orphaned_projects": sorted(orphaned_projects, key=lambda x: x["edits"], reverse=True),
     }
     _transcript_cache[sid] = (mtime, summary)
     return summary
@@ -456,6 +460,39 @@ def filter_sessions(
     return filtered
 
 
+STALE_AGE_DAYS = 60
+SHORT_PROMPT_THRESHOLD = 5
+SHORT_OLD_DAYS = 30
+
+
+def staleness_reasons(
+    last_activity_ms: int, msg_count: int, projects: list[dict], orphaned: list[dict]
+) -> list[str]:
+    """Return zero or more reasons this session looks stale. Empty list = fresh.
+    Reasons are short slugs the UI displays as a badge.
+
+    `projects` is the surviving (existence-checked) bucket list.
+    `orphaned` is the list of `apps/<name>` buckets whose dir no longer exists.
+    A session whose dominant work happened in a now-deleted project is
+    "deletable" even if it's recent and busy.
+    """
+    reasons: list[str] = []
+    if last_activity_ms <= 0:
+        return reasons
+    age_days = (time.time() * 1000 - last_activity_ms) / 86_400_000
+    if age_days >= STALE_AGE_DAYS:
+        reasons.append(f"age>{STALE_AGE_DAYS}d")
+    if msg_count < SHORT_PROMPT_THRESHOLD and age_days >= SHORT_OLD_DAYS:
+        reasons.append(f"abandoned ({msg_count} prompts, {int(age_days)}d old)")
+    # Orphan signal: any meaningful (>=3 edits) bucket whose dir is gone.
+    # Listed by name so user can see exactly which deleted project triggered.
+    significant_orphans = [o for o in orphaned if o["edits"] >= 3]
+    if significant_orphans:
+        names = ", ".join(o["name"] for o in significant_orphans[:3])
+        reasons.append(f"deleted project: {names}")
+    return reasons
+
+
 def enrich(sessions: list[dict], *, with_transcript: bool = True) -> list[dict]:
     now = time.time()
     enriched: list[dict] = []
@@ -474,6 +511,9 @@ def enrich(sessions: list[dict], *, with_transcript: bool = True) -> list[dict]:
         # is still available via /api/session/<sid> for the detail pane.
         last_text = scan.get("last_assistant_text", "") if not scan.get("missing") else ""
         last_text_preview = last_text[:300] if last_text else ""
+        projects = scan.get("projects", []) if not scan.get("missing") else []
+        orphaned = scan.get("orphaned_projects", []) if not scan.get("missing") else []
+        stale = staleness_reasons(last_activity_ms, s["msg_count"], projects, orphaned)
         enriched.append({
             **s,
             "branch": git_branch(s["proj_path"]),
@@ -487,6 +527,8 @@ def enrich(sessions: list[dict], *, with_transcript: bool = True) -> list[dict]:
             "last_activity_ms": last_activity_ms,
             "last_iso": datetime.fromtimestamp(last_activity_ms / 1000).strftime("%Y-%m-%d %H:%M") if last_activity_ms else "",
             "last_text_preview": last_text_preview,
+            "projects": projects,
+            "stale_reasons": stale,
         })
     return enriched
 
@@ -503,7 +545,7 @@ allowed_origins = [o.strip() for o in os.environ.get("ALLOWED_ORIGINS", DEFAULT_
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,
-    allow_methods=["GET"], allow_headers=["*"],
+    allow_methods=["GET", "POST"], allow_headers=["*"],
 )
 
 
@@ -515,6 +557,7 @@ def api_sessions(
     cwd: str = Query("", description="proj_path exact match"),
     long_only: bool = Query(False, alias="long"),
     errored: bool = Query(False),
+    stale: bool = Query(False, description="only sessions with at least one stale reason"),
     full: bool = Query(False, description="also search transcript bodies"),
     limit: int = Query(50, ge=1, le=2000),
     offset: int = Query(0, ge=0, description="for infinite-scroll pagination"),
@@ -528,17 +571,20 @@ def api_sessions(
     # activity, not just last user-prompt timestamp). Transcript scans are
     # mtime-cached, so steady-state cost is one stat() per session — fine.
     matched_enriched = enrich(matched, with_transcript=True)
+    if stale:
+        matched_enriched = [s for s in matched_enriched if s.get("stale_reasons")]
     matched_enriched.sort(key=lambda x: x.get("last_activity_ms") or 0, reverse=True)
     enriched = matched_enriched[offset:offset + limit]
     total_in = sum(e["input_tokens"] for e in enriched)
     total_out = sum(e["output_tokens"] for e in enriched)
+    matched_count = len(matched_enriched) if stale else len(matched)
     return {
         "total_sessions": len(all_sessions),
-        "matched": len(matched),
+        "matched": matched_count,
         "shown": len(enriched),
         "offset": offset,
         "limit": limit,
-        "has_more": (offset + len(enriched)) < len(matched),
+        "has_more": (offset + len(enriched)) < matched_count,
         "total_input_tokens": total_in,
         "total_output_tokens": total_out,
         "sessions": enriched,
@@ -658,6 +704,85 @@ def api_session_detail(sid: str, limit: int = 30):
         "cwds": scan.get("cwds", []) if not scan.get("missing") else [],
         "path_roots": scan.get("path_roots", []) if not scan.get("missing") else [],
         "projects": scan.get("projects", []) if not scan.get("missing") else [],
+    }
+
+
+ARCHIVE_DIR = PROJECTS / "_archive"
+
+
+@app.post("/api/session/{sid}/archive")
+def api_archive_session(sid: str):
+    """Archive (not delete) a session. Moves the transcript file to
+    `~/.claude/projects/_archive/<sid>.jsonl`, writes a sidecar `.meta.json`
+    capturing the original encoded-dir and proj_path so it can be restored,
+    and strips that sid's lines from `history.jsonl` (after taking a `.bak`).
+    Idempotent — calling twice is a no-op on the second call.
+    """
+    sessions = {s["sid"]: s for s in load_sessions()}
+    s = sessions.get(sid)
+    if not s:
+        raise HTTPException(404, "session not found")
+    proj_path = s["proj_path"]
+    enc = encoded_dir(proj_path)
+    src = PROJECTS / enc / f"{sid}.jsonl"
+
+    ARCHIVE_DIR.mkdir(parents=True, exist_ok=True)
+    dest = ARCHIVE_DIR / f"{sid}.jsonl"
+    meta = ARCHIVE_DIR / f"{sid}.meta.json"
+
+    # Move transcript (or, if already gone, just record the archive intent).
+    if src.exists():
+        try:
+            src.replace(dest)
+        except Exception as e:
+            raise HTTPException(500, f"failed to move transcript: {e}") from e
+    moved = dest.exists()
+
+    # Sidecar meta — written/overwritten so restore knows the encoded-dir.
+    try:
+        meta.write_text(json.dumps({
+            "sid": sid,
+            "proj_path": proj_path,
+            "encoded_dir": enc,
+            "archived_at": datetime.now(timezone.utc).isoformat(),
+            "msg_count": s["msg_count"],
+        }, indent=2))
+    except Exception as e:
+        raise HTTPException(500, f"failed to write meta: {e}") from e
+
+    # Strip sid lines from history.jsonl (with a .bak). Idempotent — if no
+    # lines match we still write the file, but it'll be byte-identical.
+    removed_lines = 0
+    if HISTORY.exists():
+        try:
+            backup = HISTORY.with_suffix(HISTORY.suffix + ".bak")
+            backup.write_bytes(HISTORY.read_bytes())
+            kept: list[str] = []
+            with HISTORY.open() as f:
+                for line in f:
+                    try:
+                        d = json.loads(line)
+                    except Exception:
+                        kept.append(line)
+                        continue
+                    if d.get("sessionId") == sid:
+                        removed_lines += 1
+                        continue
+                    kept.append(line)
+            HISTORY.write_text("".join(kept))
+        except Exception as e:
+            raise HTTPException(500, f"failed to update history.jsonl: {e}") from e
+
+    # Drop the cached scan so subsequent requests don't show ghost data.
+    _transcript_cache.pop(sid, None)
+
+    return {
+        "ok": True,
+        "sid": sid,
+        "transcript_moved": moved,
+        "archive_path": str(dest),
+        "meta_path": str(meta),
+        "history_lines_removed": removed_lines,
     }
 
 

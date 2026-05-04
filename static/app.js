@@ -89,6 +89,7 @@ const Api = {
     if (query.since) p.set('since', query.since);
     if (query.long_only) p.set('long', '1');
     if (query.errored) p.set('errored', '1');
+    if (query.stale) p.set('stale', '1');
     if (query.cwd) p.set('cwd', query.cwd);
     p.set('limit', String(limit));
     p.set('offset', String(offset));
@@ -101,13 +102,18 @@ const Api = {
     if (!r.ok) throw new Error('session detail failed');
     return r.json();
   },
+  async archive(sid) {
+    const r = await fetch(`/api/session/${encodeURIComponent(sid)}/archive`, { method: 'POST' });
+    if (!r.ok) throw new Error('archive failed: ' + r.status);
+    return r.json();
+  },
 };
 
 /* ---------- 4. Store — single source of truth for app state ---------- */
 class Store {
   constructor() {
     this.state = {
-      q: '', since: '', long_only: false, errored: false, full: false,
+      q: '', since: '', long_only: false, errored: false, stale: false, full: false,
       cwd: '', sort: 'recent', limit: 100,
       selectedSid: null,
     };
@@ -125,6 +131,7 @@ class Store {
     if (p.has('since')) this.state.since = p.get('since');
     if (p.get('long') === '1') this.state.long_only = true;
     if (p.get('errored') === '1') this.state.errored = true;
+    if (p.get('stale') === '1') this.state.stale = true;
     if (p.get('full') === '1') this.state.full = true;
     if (p.has('cwd')) this.state.cwd = p.get('cwd');
     if (p.has('sort')) this.state.sort = p.get('sort');
@@ -137,6 +144,7 @@ class Store {
     if (s.since) p.set('since', s.since);
     if (s.long_only) p.set('long', '1');
     if (s.errored) p.set('errored', '1');
+    if (s.stale) p.set('stale', '1');
     if (s.full) p.set('full', '1');
     if (s.cwd) p.set('cwd', s.cwd);
     if (s.sort !== 'recent') p.set('sort', s.sort);
@@ -193,6 +201,7 @@ class View {
         else if (key === 'week') this.store.set({ since: cur.since === '7d' ? '' : '7d' });
         else if (key === 'long') this.store.set({ long_only: !cur.long_only });
         else if (key === 'errored') this.store.set({ errored: !cur.errored });
+        else if (key === 'stale') this.store.set({ stale: !cur.stale });
         else if (key === 'full') this.store.set({ full: !cur.full });
       });
     });
@@ -207,6 +216,7 @@ class View {
       else if (key === 'week') on = s.since === '7d';
       else if (key === 'long') on = s.long_only;
       else if (key === 'errored') on = s.errored;
+      else if (key === 'stale') on = s.stale;
       else if (key === 'full') on = s.full;
       chip.classList.toggle('on', on);
     });
@@ -326,6 +336,8 @@ class View {
         this.renderCopyField('path', s.proj_path),
         this.renderCopyField('id', s.sid),
         el('span', { class: 'meta-stat', text: `${s.msg_count} prompts · ${s.duration}` }),
+        this.renderStaleBadge(s),
+        this.renderArchiveButton(s),
       ]),
       el('div', { class: 'anchor' }, [
         el('h2', { text: 'Initial prompt' }),
@@ -380,6 +392,50 @@ class View {
     const anchors = pane.querySelectorAll('.anchor-text');
     anchors.forEach(a => { clear(a); a.classList.add('empty');
       a.appendChild(document.createTextNode('(failed to load)')); });
+  }
+
+  renderStaleBadge(s) {
+    const reasons = s.stale_reasons || [];
+    if (!reasons.length) return null;
+    return el('div', { class: 'stale-badge' }, [
+      el('span', { class: 'stale-label', text: 'stale:' }),
+      el('span', { class: 'stale-reasons', text: reasons.join(' · ') }),
+    ]);
+  }
+
+  renderArchiveButton(s) {
+    // Two-step confirm: first click arms, second click within 4s archives.
+    // Mid-pane, so it reads the toast/feedback right after.
+    let armed = false;
+    const btn = el('button', { type: 'button', class: 'archive-btn', text: 'archive' });
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      if (!armed) {
+        armed = true;
+        btn.classList.add('armed');
+        btn.textContent = 'click again to confirm';
+        setTimeout(() => {
+          if (!armed) return;
+          armed = false; btn.classList.remove('armed'); btn.textContent = 'archive';
+        }, 4000);
+        return;
+      }
+      btn.disabled = true; btn.textContent = 'archiving…';
+      try {
+        await Api.archive(s.sid);
+        this.toast('session archived');
+        // Refresh list — the App controller listens; emit a noop state change.
+        this.store.set({ selectedSid: null });
+        this.closeDetail();
+        // Force a fresh fetch by re-emitting the current state.
+        this.store.emit();
+      } catch (err) {
+        this.toast('archive failed');
+        btn.disabled = false; btn.textContent = 'archive'; armed = false;
+        btn.classList.remove('armed');
+      }
+    });
+    return btn;
   }
 
   renderResume(s) {
