@@ -17,6 +17,17 @@ Environment=ALLOWED_ORIGINS=http://127.0.0.1:8766,http://localhost:8766
 # project don't get flagged as orphans. Use null to mark a name as "truly
 # deleted, never credit." Leave unset if you don't rename projects.
 # Environment=PROJECT_RENAMES={"old-name":"new-name","gone-project":null}
+#
+# Optional: which parent dirs hold your projects. Default is a sensible
+# union (apps,Projects,projects,code,src,repos) — only set if you use
+# something unusual like ~/work or ~/dev.
+# Environment=PROJECT_PARENTS=apps,Projects,work,dev
+#
+# Optional: which roots to scan for project-dir existence (used by the
+# staleness analyzer to detect deleted projects). Defaults to $HOME.
+# Set this if you keep projects under multiple roots (e.g. running as
+# root and also storing in /home/<user>).
+# Environment=PROJECT_ROOTS=/home/youruser,/opt/projects
 ExecStart=/opt/cc-session-browser/.venv/bin/uvicorn server:app \
   --host 127.0.0.1 --port 8766 --log-level warning
 Restart=always

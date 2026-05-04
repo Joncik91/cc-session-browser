@@ -143,10 +143,15 @@ FALLBACK_BUCKETS: list[tuple[str, str]] = [
 _project_exists_cache: dict[str, tuple[float, bool]] = {}
 PROJECT_EXISTS_TTL = 600.0
 # Roots to look under for project basename existence. Every (root, parent)
-# combination is checked. Generated from $HOME plus /root, crossed with
-# PROJECT_PARENTS so `/home/joncik/Projects/Pragma`, `/root/apps/foo`, etc.
-# all get covered.
-PROJECT_ROOTS = [str(HOME), "/root"]
+# combination is checked. Defaults to $HOME only, which covers the standard
+# case. Override via PROJECT_ROOTS env var (comma-separated absolute paths)
+# if you keep projects somewhere unusual (e.g. /opt, /workspace, or as root
+# with /root in addition to $HOME).
+_roots_raw = os.environ.get("PROJECT_ROOTS", "").strip()
+if _roots_raw:
+    PROJECT_ROOTS = [r.strip() for r in _roots_raw.split(",") if r.strip()]
+else:
+    PROJECT_ROOTS = [str(HOME)]
 APPS_PARENTS = [
     str(Path(root, parent))
     for root in PROJECT_ROOTS
