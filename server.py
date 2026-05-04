@@ -556,11 +556,13 @@ def staleness_reasons(
         reasons.append(f"age>{STALE_AGE_DAYS}d")
     if msg_count < SHORT_PROMPT_THRESHOLD and age_days >= SHORT_OLD_DAYS:
         reasons.append(f"abandoned ({msg_count} prompts, {int(age_days)}d old)")
-    # Orphan signal: any substantial (>=10 edits) bucket whose dir is gone.
-    # Below that, it's noise — drive-by mentions of long-dead projects, or
-    # short renames that haven't been added to PROJECT_RENAMES yet.
+    # Orphan signal: a substantial (>=10 edits) bucket whose dir is gone,
+    # AND no live apps/<name> sibling. If the session also touched a still-
+    # living project, the orphan is just a scratch dir or sibling experiment
+    # — the session itself is still meaningful and resumable.
+    has_live_apps = any(p["name"] not in STABLE_LABELS for p in projects)
     significant_orphans = [o for o in orphaned if o["edits"] >= 10]
-    if significant_orphans:
+    if significant_orphans and not has_live_apps:
         names = ", ".join(o["name"] for o in significant_orphans[:3])
         reasons.append(f"deleted project: {names}")
     return reasons
