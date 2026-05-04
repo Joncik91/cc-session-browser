@@ -84,7 +84,16 @@ def fmt_duration(ms: int) -> str:
     return "<1m"
 
 
-APPS_RE = re.compile(r"(?:^|/)apps/([^/]+)(?:/|$)")
+# Project-parent dirs — paths under any of these get bucketed by their next
+# segment. Defaults match the most common conventions (apps/, Projects/,
+# projects/, code/, src/, repos/). Override via PROJECT_PARENTS env var
+# (comma-separated, no leading/trailing slashes).
+DEFAULT_PROJECT_PARENTS = "apps,Projects,projects,code,src,repos"
+_parents_raw = os.environ.get("PROJECT_PARENTS", DEFAULT_PROJECT_PARENTS)
+PROJECT_PARENTS = tuple(p.strip() for p in _parents_raw.split(",") if p.strip())
+APPS_RE = re.compile(
+    r"(?:^|/)(?:" + "|".join(re.escape(p) for p in PROJECT_PARENTS) + r")/([^/]+)(?:/|$)"
+)
 
 # Rename map — old `apps/<name>` → new name. When a transcript references a
 # project that's since been renamed, every edit is credited to the new name
@@ -133,7 +142,16 @@ FALLBACK_BUCKETS: list[tuple[str, str]] = [
 # 10-min TTL is short enough to reflect deletes within a coffee break.
 _project_exists_cache: dict[str, tuple[float, bool]] = {}
 PROJECT_EXISTS_TTL = 600.0
-APPS_PARENTS = ["/root/apps", "/home/joncik/apps"]
+# Roots to look under for project basename existence. Every (root, parent)
+# combination is checked. Generated from $HOME plus /root, crossed with
+# PROJECT_PARENTS so `/home/joncik/Projects/Pragma`, `/root/apps/foo`, etc.
+# all get covered.
+PROJECT_ROOTS = [str(HOME), "/root"]
+APPS_PARENTS = [
+    str(Path(root, parent))
+    for root in PROJECT_ROOTS
+    for parent in PROJECT_PARENTS
+]
 
 
 def project_dir_exists(name: str) -> bool:
