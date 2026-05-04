@@ -519,12 +519,21 @@ def filter_sessions(
 
     filtered: list[dict] = []
     for s in out:
-        # cheap filters first
-        haystack = f"{s['topic']} {s['proj']} {s['proj_path']}"
+        # Cheap haystack — extends beyond topic/proj_path to include the
+        # project names extracted from `files_touched` (so `github.io` hits
+        # a session that edited `apps/joncik91.github.io/...` even though
+        # the session was launched from `/home/joncik/apps`) and the top
+        # file paths themselves. These come from the cached transcript scan
+        # so the steady-state cost is one stat() per session.
+        scan_for_haystack = scan_transcript(s["proj_path"], s["sid"])
+        proj_names = " ".join(p["name"] for p in scan_for_haystack.get("projects", []))
+        cwds_str = " ".join(c["path"] for c in scan_for_haystack.get("cwds", []))
+        files_str = " ".join(scan_for_haystack.get("files_touched", [])[:20])
+        haystack = f"{s['topic']} {s['proj']} {s['proj_path']} {proj_names} {cwds_str} {files_str}"
         if terms and not full_text and not matches_terms(haystack):
             continue
         if needs_transcript:
-            scan = scan_transcript(s["proj_path"], s["sid"])
+            scan = scan_for_haystack
             if scan.get("missing") or scan.get("error"):
                 continue
             if errored and scan["counts"]["X"] == 0:
