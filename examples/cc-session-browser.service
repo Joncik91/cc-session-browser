@@ -12,6 +12,11 @@ Environment=HOME=/root
 # the host running it. To reach it from a phone over Tailscale, add the
 # tailnet URL here AND switch --host below to 0.0.0.0.
 Environment=ALLOWED_ORIGINS=http://127.0.0.1:8766,http://localhost:8766
+# Optional: rename map for the staleness analyzer. Maps old project names
+# (under apps/) to new ones, so transcripts that reference a since-renamed
+# project don't get flagged as orphans. Use null to mark a name as "truly
+# deleted, never credit." Leave unset if you don't rename projects.
+# Environment=PROJECT_RENAMES={"old-name":"new-name","gone-project":null}
 ExecStart=/opt/cc-session-browser/.venv/bin/uvicorn server:app \
   --host 127.0.0.1 --port 8766 --log-level warning
 Restart=always

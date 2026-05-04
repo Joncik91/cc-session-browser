@@ -85,6 +85,36 @@ def fmt_duration(ms: int) -> str:
 
 
 APPS_RE = re.compile(r"(?:^|/)apps/([^/]+)(?:/|$)")
+
+# Rename map — old `apps/<name>` → new name. When a transcript references a
+# project that's since been renamed, every edit is credited to the new name
+# instead. Env-driven so it works the same in this repo and in user
+# deployments. Format: PROJECT_RENAMES='{"old":"new","old2":null}' — null
+# means "truly deleted, do not credit." Loaded once at module import.
+def _load_renames() -> dict[str, str | None]:
+    raw = os.environ.get("PROJECT_RENAMES", "").strip()
+    if not raw:
+        return {}
+    try:
+        d = json.loads(raw)
+        if not isinstance(d, dict):
+            return {}
+        return {str(k): (None if v is None else str(v)) for k, v in d.items()}
+    except Exception:
+        return {}
+
+
+PROJECT_RENAMES: dict[str, str | None] = _load_renames()
+
+
+def canonical_project(name: str) -> str | None:
+    """Apply PROJECT_RENAMES once. Returns None if the name maps to null
+    (explicit "deleted, don't credit"); the new name if remapped; otherwise
+    the original name unchanged.
+    """
+    if name in PROJECT_RENAMES:
+        return PROJECT_RENAMES[name]
+    return name
 # Fallback path-prefix → label mapping for non-apps work. Matched in order;
 # first hit wins. Lets a hooks-only session show "project: .claude" instead of
 # vanishing under the apps/ filter.
@@ -122,13 +152,14 @@ STABLE_LABELS = {".claude", "claude-obsidian", "system"}
 
 def project_bucket(path: str) -> str | None:
     """Map a touched file path to a project name, or None if it's noise.
-    Priority: an `apps/<name>` segment anywhere → that <name>; otherwise the
-    first matching FALLBACK bucket. Anything else (e.g. /tmp, $HOME root) is
-    not credited to any project.
+    Priority: an `apps/<name>` segment anywhere → that <name> (after applying
+    PROJECT_RENAMES); otherwise the first matching FALLBACK bucket. Anything
+    else (e.g. /tmp, $HOME root) is not credited to any project.
+    Names mapped to null in PROJECT_RENAMES are dropped entirely.
     """
     m = APPS_RE.search(path)
     if m:
-        return m.group(1)
+        return canonical_project(m.group(1))
     for prefix, label in FALLBACK_BUCKETS:
         if path.startswith(prefix):
             return label
@@ -190,6 +221,10 @@ def scan_transcript(proj_path: str, sid: str) -> dict:
     # but the actual code lives in `apps/<name>/...`. Falls back to other
     # buckets (`.claude`, `claude-obsidian`) when no apps/ edits exist.
     project_edit_counts: dict[str, int] = defaultdict(int)
+    # Names explicitly mapped to null in PROJECT_RENAMES (truly deleted).
+    # Counted separately so they never appear in the active project ranking
+    # but DO show up in orphaned_projects → stale_reasons.
+    null_mapped_edit_counts: dict[str, int] = defaultdict(int)
     # Distinct cwds seen across user messages, keyed by path → first-seen ms.
     # Captures mid-session `cd` jumps so the detail pane can show every
     # workspace the session moved through.
@@ -268,6 +303,15 @@ def scan_transcript(proj_path: str, sid: str) -> dict:
                                     pb = project_bucket(fp)
                                     if pb:
                                         project_edit_counts[pb] += 1
+                                    else:
+                                        # null-mapped (explicit deleted): keep
+                                        # the original apps/<name> in a side
+                                        # counter so orphan detection still
+                                        # fires, but it never enters project
+                                        # ranking.
+                                        m = APPS_RE.search(fp)
+                                        if m and m.group(1) in PROJECT_RENAMES and PROJECT_RENAMES[m.group(1)] is None:
+                                            null_mapped_edit_counts[m.group(1)] += 1
                             elif name == "Bash":
                                 counts["B"] += 1
                             elif name == "Read":
@@ -317,6 +361,9 @@ def scan_transcript(proj_path: str, sid: str) -> dict:
             project_filtered.append((label, edits))
         else:
             orphaned_projects.append({"name": label, "edits": edits})
+    # null-mapped names always count as orphans — that's their definition.
+    for label, edits in null_mapped_edit_counts.items():
+        orphaned_projects.append({"name": label, "edits": edits})
     project_filtered.sort(key=lambda x: x[1], reverse=True)
     total_edits = sum(c for _, c in project_filtered)
     projects_top: list[dict] = []
@@ -484,9 +531,10 @@ def staleness_reasons(
         reasons.append(f"age>{STALE_AGE_DAYS}d")
     if msg_count < SHORT_PROMPT_THRESHOLD and age_days >= SHORT_OLD_DAYS:
         reasons.append(f"abandoned ({msg_count} prompts, {int(age_days)}d old)")
-    # Orphan signal: any meaningful (>=3 edits) bucket whose dir is gone.
-    # Listed by name so user can see exactly which deleted project triggered.
-    significant_orphans = [o for o in orphaned if o["edits"] >= 3]
+    # Orphan signal: any substantial (>=10 edits) bucket whose dir is gone.
+    # Below that, it's noise — drive-by mentions of long-dead projects, or
+    # short renames that haven't been added to PROJECT_RENAMES yet.
+    significant_orphans = [o for o in orphaned if o["edits"] >= 10]
     if significant_orphans:
         names = ", ".join(o["name"] for o in significant_orphans[:3])
         reasons.append(f"deleted project: {names}")
