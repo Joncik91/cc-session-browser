@@ -73,7 +73,19 @@ one to resume.
 - **URL state**: every filter + search term lands in the URL. Share a search
   result link from desktop to phone over Tailscale.
 - **Filter chips**: today / this week / long (>30min) / errored (transcript has
-  tool errors) / full-text search.
+  tool errors) / **stale** (see below) / full-text search.
+- **Project detection**: the detail pane shows which projects a session
+  actually worked on, derived from the *files edited* (not the launch dir).
+  Sessions that span 3-5 projects show all of them. Configurable via
+  `PROJECT_PARENTS` so it works for `apps/`, `Projects/`, `code/`, etc.
+- **Staleness analyzer**: flags sessions worth removing — older than 60d,
+  abandoned (<5 prompts AND >30d old), or whose project directory has been
+  deleted. Renamed projects can be mapped via `PROJECT_RENAMES` so they
+  don't trigger false positives.
+- **Archive (not delete)**: a two-step-confirm button moves a session
+  transcript to `~/.claude/projects/_archive/<sid>.jsonl` with a
+  `.meta.json` sidecar so it can be restored. `history.jsonl` is rewritten
+  with a `.bak` for safety.
 - **Mobile-first responsive**: 16px inputs (no iOS zoom), 44px tap targets,
   works great over Tailscale from a phone.
 
@@ -81,7 +93,7 @@ one to resume.
 
 | File | Responsibility |
 |---|---|
-| `server.py` | FastAPI app — reads `~/.claude/`, exposes `/api/sessions`, `/api/session/<sid>` |
+| `server.py` | FastAPI app — reads `~/.claude/`, exposes `/api/sessions`, `/api/session/<sid>`, `POST /api/session/<sid>/archive` |
 | `static/index.html` | minimal shell — markup only, no logic |
 | `static/app.css` | All design tokens + layout (Field.io-inspired dark theme) |
 | `static/app.js` | `Api` (data) · `Store` (state) · `View` (DOM) · `App` (controller) — strict SOLID separation |
@@ -115,17 +127,30 @@ form `cd <project> && claude --resume <sid>`.
 
 ## Configure
 
-Environment variables:
+All configuration is via environment variables — there is no config file.
+Sensible defaults mean most users only need `ALLOWED_ORIGINS`.
 
 | Var | Default | Purpose |
 |---|---|---|
 | `ALLOWED_ORIGINS` | `http://127.0.0.1:8766,http://localhost:8766` | Comma-separated CORS allowlist. Add your LAN/Tailscale URLs to access from phone or other devices. |
+| `PROJECT_PARENTS` | `apps,Projects,projects,code,src,repos` | Which parent dir names to bucket projects under. The basename right after one of these counts as a project. |
+| `PROJECT_ROOTS` | `$HOME` | Where to look for project directories when checking existence (used by the staleness analyzer to detect deleted projects). Comma-separated absolute paths. |
+| `PROJECT_RENAMES` | (unset) | JSON map of old project names → new ones, so transcripts that reference renamed projects credit the surviving name. Use `null` to mark a project as deleted: `{"old":"new","gone":null}`. |
 
 Example for LAN + Tailscale access:
 
 ```bash
 ALLOWED_ORIGINS="http://127.0.0.1:8766,http://192.168.1.10:8766,http://100.64.0.5:8766" \
   uvicorn server:app --host 0.0.0.0 --port 8766
+```
+
+Example with project-name overrides (e.g. running as root with projects
+under both `/root/apps` and `/home/you/Projects`, and one project renamed):
+
+```bash
+PROJECT_ROOTS="/root,/home/you" \
+PROJECT_RENAMES='{"old-name":"new-name","aaOS":null}' \
+  uvicorn server:app --host 127.0.0.1 --port 8766
 ```
 
 ## Run as a systemd service
