@@ -346,30 +346,20 @@ class View {
       this.fillAnchor(anchors[1], detail.last_assistant_text);
     }
     const projLine = pane.querySelector('.meta-projects');
-    if (projLine) this.fillProjects(projLine, s, detail.cwds || []);
+    if (projLine) this.fillProjects(projLine, s, detail.projects || []);
   }
 
-  fillProjects(node, s, cwds) {
-    // Derive project basenames from each distinct cwd. Single-cwd sessions
-    // collapse to one name (matches the row chip). Multi-cwd sessions show
-    // names joined with " & " (e.g. "aaOS & bouncer"). Dedup while preserving
-    // first-seen order so the primary project leads.
+  fillProjects(node, s, projects) {
+    // `projects` is the server-ranked list of `apps/<name>` (or stable-label)
+    // edit-buckets, already filtered for: existence on disk, ≥5% of edits,
+    // and either single-leader (≥70%) or top-3. We just render the names.
     clear(node);
-    const seen = new Set();
-    const names = [];
-    const sources = cwds.length ? cwds.map(c => c.path) : [s.proj_path];
-    for (const p of sources) {
-      if (!p) continue;
-      let name;
-      if (p === '/root' || p === '/home/joncik' || p === '/' ) name = '~';
-      else {
-        // basename — last path segment.
-        const parts = p.split('/').filter(Boolean);
-        name = parts[parts.length - 1] || p;
-      }
-      if (!seen.has(name)) { seen.add(name); names.push(name); }
+    if (!projects.length) {
+      node.appendChild(el('span', { class: 'meta-copy-label', text: 'project:' }));
+      node.appendChild(el('span', { class: 'meta-projects-value mute', text: '(no edits)' }));
+      return;
     }
-    const value = names.join(' & ') || '~';
+    const value = projects.map(p => p.name).join(' & ');
     node.appendChild(el('span', { class: 'meta-copy-label', text: 'project:' }));
     node.appendChild(el('span', { class: 'meta-projects-value', text: value }));
   }

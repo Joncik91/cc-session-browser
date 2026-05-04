@@ -84,6 +84,57 @@ def fmt_duration(ms: int) -> str:
     return "<1m"
 
 
+APPS_RE = re.compile(r"(?:^|/)apps/([^/]+)(?:/|$)")
+# Fallback path-prefix → label mapping for non-apps work. Matched in order;
+# first hit wins. Lets a hooks-only session show "project: .claude" instead of
+# vanishing under the apps/ filter.
+FALLBACK_BUCKETS: list[tuple[str, str]] = [
+    ("/root/.claude/", ".claude"),
+    ("/home/joncik/.claude/", ".claude"),
+    ("/root/claude-obsidian/", "claude-obsidian"),
+    ("/home/joncik/claude-obsidian/", "claude-obsidian"),
+    ("/etc/", "system"),
+    ("/usr/local/", "system"),
+]
+
+
+# Existence cache for `apps/<name>` dirs — skips re-statting on every request.
+# A project deleted after the session ran shouldn't keep appearing in the UI;
+# 10-min TTL is short enough to reflect deletes within a coffee break.
+_project_exists_cache: dict[str, tuple[float, bool]] = {}
+PROJECT_EXISTS_TTL = 600.0
+APPS_PARENTS = ["/root/apps", "/home/joncik/apps"]
+
+
+def project_dir_exists(name: str) -> bool:
+    now = time.time()
+    cached = _project_exists_cache.get(name)
+    if cached and now - cached[0] < PROJECT_EXISTS_TTL:
+        return cached[1]
+    exists = any(Path(parent, name).is_dir() for parent in APPS_PARENTS)
+    _project_exists_cache[name] = (now, exists)
+    return exists
+
+
+# Labels we never gate on existence — they're stable system locations.
+STABLE_LABELS = {".claude", "claude-obsidian", "system"}
+
+
+def project_bucket(path: str) -> str | None:
+    """Map a touched file path to a project name, or None if it's noise.
+    Priority: an `apps/<name>` segment anywhere → that <name>; otherwise the
+    first matching FALLBACK bucket. Anything else (e.g. /tmp, $HOME root) is
+    not credited to any project.
+    """
+    m = APPS_RE.search(path)
+    if m:
+        return m.group(1)
+    for prefix, label in FALLBACK_BUCKETS:
+        if path.startswith(prefix):
+            return label
+    return None
+
+
 def encoded_dir(proj_path: str) -> str:
     """Project paths in ~/.claude/projects/ are stored with `/` replaced by `-`.
     Example: `/home/user/apps` -> `-home-user-apps`. `/root` -> `-root`.
@@ -134,6 +185,11 @@ def scan_transcript(proj_path: str, sid: str) -> dict:
     # Roots are 2-segment slices (e.g. /home/joncik, /etc, /root) to match how
     # humans think about "which project / area was being touched."
     root_touch_counts: dict[str, int] = defaultdict(int)
+    # Project-name edit counter — the basename right after `apps/` in any file
+    # path Claude wrote or edited. Sessions are usually launched from anywhere
+    # but the actual code lives in `apps/<name>/...`. Falls back to other
+    # buckets (`.claude`, `claude-obsidian`) when no apps/ edits exist.
+    project_edit_counts: dict[str, int] = defaultdict(int)
     # Distinct cwds seen across user messages, keyed by path → first-seen ms.
     # Captures mid-session `cd` jumps so the detail pane can show every
     # workspace the session moved through.
@@ -209,6 +265,9 @@ def scan_transcript(proj_path: str, sid: str) -> dict:
                                     else:
                                         root = fp
                                     root_touch_counts[root] += 1
+                                    pb = project_bucket(fp)
+                                    if pb:
+                                        project_edit_counts[pb] += 1
                             elif name == "Bash":
                                 counts["B"] += 1
                             elif name == "Read":
@@ -246,6 +305,25 @@ def scan_transcript(proj_path: str, sid: str) -> dict:
         ({"root": r, "edits": c} for r, c in root_touch_counts.items()),
         key=lambda x: x["edits"], reverse=True,
     )[:8]
+    # Project ranking — drop dirs that no longer exist on disk (project was
+    # deleted/renamed after the session ran). Stable labels skip the check.
+    # Sort by edit count desc, then apply dominance rule for display:
+    #   - if top entry holds ≥70% of total → only that one
+    #   - else show up to 3 entries above 5% threshold
+    project_filtered: list[tuple[str, int]] = []
+    for label, edits in project_edit_counts.items():
+        if label in STABLE_LABELS or project_dir_exists(label):
+            project_filtered.append((label, edits))
+    project_filtered.sort(key=lambda x: x[1], reverse=True)
+    total_edits = sum(c for _, c in project_filtered)
+    projects_top: list[dict] = []
+    if total_edits > 0:
+        threshold = max(1, int(total_edits * 0.05))
+        candidates = [(n, c) for n, c in project_filtered if c >= threshold]
+        if candidates and candidates[0][1] >= total_edits * 0.70:
+            projects_top = [{"name": candidates[0][0], "edits": candidates[0][1]}]
+        else:
+            projects_top = [{"name": n, "edits": c} for n, c in candidates[:3]]
     summary = {
         "missing": False,
         "mtime": mtime,
@@ -258,6 +336,7 @@ def scan_transcript(proj_path: str, sid: str) -> dict:
         "last_assistant_text": last_assistant_text,
         "cwds": cwds_sorted,
         "path_roots": roots_sorted,
+        "projects": projects_top,
     }
     _transcript_cache[sid] = (mtime, summary)
     return summary
@@ -569,7 +648,7 @@ def api_session_detail(sid: str, limit: int = 30):
                 last_assistant = found_text
                 break  # stop at the first assistant entry with real text content
 
-    # Pull cwds + path_roots from the cached transcript scan (no second pass).
+    # Pull cwds + path_roots + projects from the cached transcript scan.
     scan = scan_transcript(s["proj_path"], sid)
     return {
         "sid": sid,
@@ -578,6 +657,7 @@ def api_session_detail(sid: str, limit: int = 30):
         "messages": msgs,
         "cwds": scan.get("cwds", []) if not scan.get("missing") else [],
         "path_roots": scan.get("path_roots", []) if not scan.get("missing") else [],
+        "projects": scan.get("projects", []) if not scan.get("missing") else [],
     }
 
 
