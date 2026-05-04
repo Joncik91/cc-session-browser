@@ -255,10 +255,14 @@ button { background: none; border: none; padding: 0; cursor: pointer; }
   display: flex; align-items: baseline; gap: var(--gap-2);
   font-size: var(--fz-sm);
 }
+.meta-projects {
+  flex-wrap: wrap;
+}
 .meta-projects-value {
   color: var(--accent); font-weight: 600;
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  white-space: normal; overflow-wrap: anywhere;
   user-select: all;
+  flex: 1; min-width: 0;
 }
 .meta-projects-value.mute { color: var(--mute); font-weight: 400; font-style: italic; }
 
