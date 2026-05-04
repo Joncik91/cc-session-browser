@@ -91,8 +91,12 @@ def fmt_duration(ms: int) -> str:
 DEFAULT_PROJECT_PARENTS = "apps,Projects,projects,code,src,repos"
 _parents_raw = os.environ.get("PROJECT_PARENTS", DEFAULT_PROJECT_PARENTS)
 PROJECT_PARENTS = tuple(p.strip() for p in _parents_raw.split(",") if p.strip())
+# Require a trailing slash so we only capture directory names, not filenames
+# directly under a parent (e.g. `src/__init__.py` won't bucket as project
+# `__init__.py`). Trailing-slash means there's at least one more path
+# segment after the captured name — that's the file in the project.
 APPS_RE = re.compile(
-    r"(?:^|/)(?:" + "|".join(re.escape(p) for p in PROJECT_PARENTS) + r")/([^/]+)(?:/|$)"
+    r"(?:^|/)(?:" + "|".join(re.escape(p) for p in PROJECT_PARENTS) + r")/([^/]+)/"
 )
 
 # Rename map — old `apps/<name>` → new name. When a transcript references a
