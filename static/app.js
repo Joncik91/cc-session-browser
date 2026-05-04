@@ -322,8 +322,9 @@ class View {
       el('button', { class: 'close-btn', onclick: () => this.closeDetail() }, ['← back']),
       this.renderResume(s),
       el('div', { class: 'detail-meta' }, [
-        el('span', { text: s.proj_path }),
-        el('span', { text: `${s.msg_count} prompts · ${s.duration}` }),
+        this.renderCopyField('path', s.proj_path),
+        this.renderCopyField('id', s.sid),
+        el('span', { class: 'meta-stat', text: `${s.msg_count} prompts · ${s.duration}` }),
       ]),
       el('div', { class: 'anchor' }, [
         el('h2', { text: 'Initial prompt' }),
@@ -365,16 +366,57 @@ class View {
 
   renderResume(s) {
     const code = el('code', { text: s.resume });
-    const btn = el('button', { type: 'button', text: 'copy' });
-    btn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      navigator.clipboard.writeText(s.resume).then(() => {
-        btn.classList.add('copied'); btn.textContent = 'copied';
-        setTimeout(() => { btn.classList.remove('copied'); btn.textContent = 'copy'; }, 1200);
-        this.toast('resume command copied');
-      });
-    });
+    const btn = this.makeCopyButton(s.resume, 'resume command copied');
     return el('div', { class: 'resume' }, [code, btn]);
+  }
+
+  renderCopyField(label, value) {
+    if (!value) return null;
+    const btn = this.makeCopyButton(value, `${label} copied`);
+    return el('span', { class: 'meta-copy', title: `click button to copy ${label}` }, [
+      el('span', { class: 'meta-copy-label', text: label + ':' }),
+      el('span', { class: 'meta-copy-value', text: value }),
+      btn,
+    ]);
+  }
+
+  makeCopyButton(value, toastMsg) {
+    const btn = el('button', { type: 'button', class: 'copy-btn', text: 'copy', 'aria-label': 'copy' });
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const ok = await this.copyText(value);
+      if (!ok) { this.toast('copy failed — clipboard blocked'); return; }
+      btn.classList.add('copied'); btn.textContent = 'copied';
+      setTimeout(() => { btn.classList.remove('copied'); btn.textContent = 'copy'; }, 1200);
+      this.toast(toastMsg);
+    });
+    return btn;
+  }
+
+  async copyText(value) {
+    // navigator.clipboard requires HTTPS or localhost. Over Tailscale/LAN
+    // (http://192.168.x or http://100.x) it's undefined — fall back to a
+    // hidden textarea + execCommand('copy'), which still works in modern
+    // browsers from a user gesture.
+    try {
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(value);
+        return true;
+      }
+    } catch (_) { /* fall through */ }
+    try {
+      const ta = document.createElement('textarea');
+      ta.value = value;
+      ta.setAttribute('readonly', '');
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      ta.style.pointerEvents = 'none';
+      document.body.appendChild(ta);
+      ta.select();
+      const ok = document.execCommand('copy');
+      document.body.removeChild(ta);
+      return ok;
+    } catch (_) { return false; }
   }
 
   closeDetail() {
