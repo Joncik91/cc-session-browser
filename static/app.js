@@ -322,6 +322,7 @@ class View {
       el('button', { class: 'close-btn', onclick: () => this.closeDetail() }, ['← back']),
       this.renderResume(s),
       el('div', { class: 'detail-meta' }, [
+        el('div', { class: 'meta-projects', text: 'project: …' }),
         this.renderCopyField('path', s.proj_path),
         this.renderCopyField('id', s.sid),
         el('span', { class: 'meta-stat', text: `${s.msg_count} prompts · ${s.duration}` }),
@@ -334,10 +335,6 @@ class View {
         el('h2', { text: 'Last assistant output' }),
         el('div', { class: 'anchor-text empty', text: 'loading…' }),
       ]),
-      el('div', { class: 'anchor workspaces-anchor' }, [
-        el('h2', { text: 'Workspaces' }),
-        el('div', { class: 'workspaces-body empty', text: 'loading…' }),
-      ]),
     ]);
   }
 
@@ -348,53 +345,33 @@ class View {
       this.fillAnchor(anchors[0], detail.first_user_prompt);
       this.fillAnchor(anchors[1], detail.last_assistant_text);
     }
-    const wsBody = pane.querySelector('.workspaces-body');
-    if (wsBody) this.fillWorkspaces(wsBody, detail.cwds || [], detail.path_roots || []);
+    const projLine = pane.querySelector('.meta-projects');
+    if (projLine) this.fillProjects(projLine, s, detail.cwds || []);
   }
 
-  fillWorkspaces(node, cwds, roots) {
+  fillProjects(node, s, cwds) {
+    // Derive project basenames from each distinct cwd. Single-cwd sessions
+    // collapse to one name (matches the row chip). Multi-cwd sessions show
+    // names joined with " & " (e.g. "aaOS & bouncer"). Dedup while preserving
+    // first-seen order so the primary project leads.
     clear(node);
-    const hasCwds = cwds.length > 0;
-    const hasRoots = roots.length > 0;
-    if (!hasCwds && !hasRoots) {
-      node.classList.add('empty');
-      node.appendChild(document.createTextNode('(no workspace data)'));
-      return;
-    }
-    node.classList.remove('empty');
-
-    // Cwds: only render when more than one. Single cwd is already shown in the
-    // path row of the meta strip, so repeating it here is noise.
-    if (hasCwds && cwds.length > 1) {
-      node.appendChild(el('div', { class: 'ws-section-label', text: `${cwds.length} working directories` }));
-      const list = el('div', { class: 'ws-list' });
-      for (const c of cwds) {
-        const time = c.first_seen_ms
-          ? new Date(c.first_seen_ms).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
-          : '';
-        list.appendChild(el('div', { class: 'ws-row' }, [
-          el('span', { class: 'ws-time', text: time }),
-          el('span', { class: 'ws-path', text: c.path, title: c.path }),
-          this.makeCopyButton(c.path, 'path copied'),
-        ]));
+    const seen = new Set();
+    const names = [];
+    const sources = cwds.length ? cwds.map(c => c.path) : [s.proj_path];
+    for (const p of sources) {
+      if (!p) continue;
+      let name;
+      if (p === '/root' || p === '/home/joncik' || p === '/' ) name = '~';
+      else {
+        // basename — last path segment.
+        const parts = p.split('/').filter(Boolean);
+        name = parts[parts.length - 1] || p;
       }
-      node.appendChild(list);
+      if (!seen.has(name)) { seen.add(name); names.push(name); }
     }
-
-    // Path roots: which dirs got actual write/edit calls. Always shown when
-    // present — different signal from cwd ("where Claude was sitting").
-    if (hasRoots) {
-      node.appendChild(el('div', { class: 'ws-section-label', text: 'Files edited by area' }));
-      const list = el('div', { class: 'ws-list' });
-      for (const r of roots) {
-        list.appendChild(el('div', { class: 'ws-row' }, [
-          el('span', { class: 'ws-edits', text: `${r.edits}×` }),
-          el('span', { class: 'ws-path', text: r.root, title: r.root }),
-          this.makeCopyButton(r.root, 'path copied'),
-        ]));
-      }
-      node.appendChild(list);
-    }
+    const value = names.join(' & ') || '~';
+    node.appendChild(el('span', { class: 'meta-copy-label', text: 'project:' }));
+    node.appendChild(el('span', { class: 'meta-projects-value', text: value }));
   }
 
   fillAnchor(node, text) {
@@ -413,11 +390,6 @@ class View {
     const anchors = pane.querySelectorAll('.anchor-text');
     anchors.forEach(a => { clear(a); a.classList.add('empty');
       a.appendChild(document.createTextNode('(failed to load)')); });
-    const wsBody = pane.querySelector('.workspaces-body');
-    if (wsBody) {
-      clear(wsBody); wsBody.classList.add('empty');
-      wsBody.appendChild(document.createTextNode('(failed to load)'));
-    }
   }
 
   renderResume(s) {
