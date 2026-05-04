@@ -393,10 +393,12 @@ def scan_transcript(proj_path: str, sid: str) -> dict:
     if total_edits > 0:
         threshold = max(1, int(total_edits * 0.05))
         candidates = [(n, c) for n, c in project_filtered if c >= threshold]
-        if candidates and candidates[0][1] >= total_edits * 0.70:
+        if candidates and candidates[0][1] >= total_edits * 0.85:
+            # Only collapse to a single name when the leader truly dominates.
             projects_top = [{"name": candidates[0][0], "edits": candidates[0][1]}]
         else:
-            projects_top = [{"name": n, "edits": c} for n, c in candidates[:3]]
+            # Otherwise show up to 5 — sessions often span 3-5 projects.
+            projects_top = [{"name": n, "edits": c} for n, c in candidates[:5]]
     summary = {
         "missing": False,
         "mtime": mtime,
