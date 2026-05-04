@@ -11,17 +11,41 @@
 [![No build step](https://img.shields.io/badge/no%20build%20step-✓-58D070)]()
 [![Mobile-friendly](https://img.shields.io/badge/mobile-friendly-58D070)]()
 [![PRs welcome](https://img.shields.io/badge/PRs-welcome-E8954A.svg)](CONTRIBUTING.md)
+[![Standard README](https://img.shields.io/badge/readme%20style-standard-brightgreen.svg)](https://github.com/RichardLitt/standard-readme)
 
 A local web UI to search, browse, and resume **Claude Code** sessions across all
 projects on a single dev machine.
 
 </div>
 
-Inspired by Raycast's precision retrieval and a photographer's contact sheet —
-designed for *recognition under partial memory* when you've got hundreds of
-past sessions and need to find the right one to resume.
+## Table of Contents
 
-![cc-session-browser screenshot](docs/screenshot.png)
+- [Background](#background)
+- [Features](#features)
+- [Architecture](#architecture)
+- [Install](#install)
+- [Usage](#usage)
+- [Configure](#configure)
+- [Run as a systemd service](#run-as-a-systemd-service)
+- [Security](#security)
+- [Contributing](#contributing)
+- [License](#license)
+
+## Background
+
+Claude Code stores every session as a JSONL transcript on disk
+(`~/.claude/projects/<encoded-cwd>/<sid>.jsonl`). After a few weeks of daily
+use you end up with hundreds of them, scattered across project directories,
+and the built-in `claude --resume` picker only shows the most recent few per
+project. Finding *that one session from last Tuesday where I was debugging
+the auth flow* becomes the limiting factor.
+
+`cc-session-browser` is a single-machine, no-build-step web UI that reads
+those transcripts directly and gives you full-text search, date-grouped
+browsing, and one-click resume. Inspired by Raycast's precision retrieval
+and a photographer's contact sheet — designed for *recognition under partial
+memory* when you've got hundreds of past sessions and need to find the right
+one to resume.
 
 > Reads `~/.claude/history.jsonl` and `~/.claude/projects/<encoded-cwd>/<sid>.jsonl`
 > directly from disk. Nothing leaves your machine — purely local.
@@ -36,6 +60,10 @@ past sessions and need to find the right one to resume.
 - **Persistent detail pane** (desktop): click a row → right-hand pane shows the
   initial prompt + the last assistant output + a copy-pasteable resume command.
   Mobile (≤900px) collapses to a slide-in drawer.
+- **Per-field copy buttons**: resume command, project path, and session ID
+  each have their own copy button. Falls back to `execCommand('copy')` when
+  the page is served over plain HTTP (LAN, Tailscale) where
+  `navigator.clipboard` is unavailable.
 - **Real activity sort**: orders by transcript file mtime (catches resumes,
   tool calls, autonomous work) — not just last user-message timestamp.
 - **Live indicator**: green `●` for any session whose transcript was modified in
@@ -54,9 +82,10 @@ past sessions and need to find the right one to resume.
 | File | Responsibility |
 |---|---|
 | `server.py` | FastAPI app — reads `~/.claude/`, exposes `/api/sessions`, `/api/session/<sid>` |
-| `static/index.html` | 60-line shell — markup only, no logic |
+| `static/index.html` | minimal shell — markup only, no logic |
 | `static/app.css` | All design tokens + layout (Field.io-inspired dark theme) |
 | `static/app.js` | `Api` (data) · `Store` (state) · `View` (DOM) · `App` (controller) — strict SOLID separation |
+| `examples/cc-session-browser.service` | reference systemd unit (LAN + Tailscale binding) |
 
 ## Install
 
@@ -70,16 +99,23 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-## Run
+## Usage
 
 ```bash
 # Defaults: bind 127.0.0.1:8766, CORS allows loopback only
 .venv/bin/uvicorn server:app --host 127.0.0.1 --port 8766
 ```
 
-Open `http://127.0.0.1:8766/` in your browser.
+Open `http://127.0.0.1:8766/` in your browser. The search box autofocuses on
+desktop; start typing to filter sessions across all projects on this machine.
 
-## Configure (env vars)
+Click any row to open the detail pane. Use the **copy** buttons to grab the
+resume command, project path, or session ID. The resume command takes the
+form `cd <project> && claude --resume <sid>`.
+
+## Configure
+
+Environment variables:
 
 | Var | Default | Purpose |
 |---|---|---|
@@ -118,6 +154,9 @@ PRs welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) — the codebase is
 intentionally small (no build step, single-file frontend, stdlib + FastAPI),
 which means the design philosophy matters more than usual.
 
+This README follows the [Standard README](https://github.com/RichardLitt/standard-readme)
+specification.
+
 ## License
 
-MIT. See `LICENSE`.
+MIT © Joncik91. See [LICENSE](LICENSE).
