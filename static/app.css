@@ -250,6 +250,39 @@ button { background: none; border: none; padding: 0; cursor: pointer; }
 }
 .anchor-text.empty { color: var(--mute-2); font-style: italic; }
 
+/* Workspaces — distinct cwds + path-root edit summary. */
+.workspaces-body {
+  font-size: var(--fz-sm); color: var(--text-2);
+  padding: var(--gap-3); background: var(--bg);
+  border: 1px solid var(--line-2); border-radius: var(--r);
+}
+.workspaces-body.empty {
+  color: var(--mute-2); font-style: italic;
+}
+.ws-section-label {
+  color: var(--mute); text-transform: uppercase; letter-spacing: 0.1em;
+  font-size: 10px; margin: 0 0 6px;
+}
+.ws-section-label + .ws-list { margin-bottom: var(--gap-3); }
+.ws-list:last-child { margin-bottom: 0; }
+.ws-row {
+  display: flex; align-items: center; gap: var(--gap-2);
+  padding: 4px 0; border-bottom: 1px solid var(--line-2);
+  min-width: 0;
+}
+.ws-row:last-child { border-bottom: none; }
+.ws-time, .ws-edits {
+  flex-shrink: 0; color: var(--mute);
+  font-size: var(--fz-xs); font-variant-numeric: tabular-nums;
+  min-width: 64px;
+}
+.ws-edits { color: var(--accent); font-weight: 600; min-width: 38px; text-align: right; }
+.ws-path {
+  flex: 1; min-width: 0; color: var(--text-2);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  user-select: all;
+}
+
 /* ---------- empty / loading ---------- */
 .placeholder {
   padding: 80px var(--pad-x); text-align: center; color: var(--mute);

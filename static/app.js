@@ -334,6 +334,10 @@ class View {
         el('h2', { text: 'Last assistant output' }),
         el('div', { class: 'anchor-text empty', text: 'loading…' }),
       ]),
+      el('div', { class: 'anchor workspaces-anchor' }, [
+        el('h2', { text: 'Workspaces' }),
+        el('div', { class: 'workspaces-body empty', text: 'loading…' }),
+      ]),
     ]);
   }
 
@@ -343,6 +347,53 @@ class View {
     if (anchors.length >= 2) {
       this.fillAnchor(anchors[0], detail.first_user_prompt);
       this.fillAnchor(anchors[1], detail.last_assistant_text);
+    }
+    const wsBody = pane.querySelector('.workspaces-body');
+    if (wsBody) this.fillWorkspaces(wsBody, detail.cwds || [], detail.path_roots || []);
+  }
+
+  fillWorkspaces(node, cwds, roots) {
+    clear(node);
+    const hasCwds = cwds.length > 0;
+    const hasRoots = roots.length > 0;
+    if (!hasCwds && !hasRoots) {
+      node.classList.add('empty');
+      node.appendChild(document.createTextNode('(no workspace data)'));
+      return;
+    }
+    node.classList.remove('empty');
+
+    // Cwds: only render when more than one. Single cwd is already shown in the
+    // path row of the meta strip, so repeating it here is noise.
+    if (hasCwds && cwds.length > 1) {
+      node.appendChild(el('div', { class: 'ws-section-label', text: `${cwds.length} working directories` }));
+      const list = el('div', { class: 'ws-list' });
+      for (const c of cwds) {
+        const time = c.first_seen_ms
+          ? new Date(c.first_seen_ms).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+          : '';
+        list.appendChild(el('div', { class: 'ws-row' }, [
+          el('span', { class: 'ws-time', text: time }),
+          el('span', { class: 'ws-path', text: c.path, title: c.path }),
+          this.makeCopyButton(c.path, 'path copied'),
+        ]));
+      }
+      node.appendChild(list);
+    }
+
+    // Path roots: which dirs got actual write/edit calls. Always shown when
+    // present — different signal from cwd ("where Claude was sitting").
+    if (hasRoots) {
+      node.appendChild(el('div', { class: 'ws-section-label', text: 'Files edited by area' }));
+      const list = el('div', { class: 'ws-list' });
+      for (const r of roots) {
+        list.appendChild(el('div', { class: 'ws-row' }, [
+          el('span', { class: 'ws-edits', text: `${r.edits}×` }),
+          el('span', { class: 'ws-path', text: r.root, title: r.root }),
+          this.makeCopyButton(r.root, 'path copied'),
+        ]));
+      }
+      node.appendChild(list);
     }
   }
 
@@ -362,6 +413,11 @@ class View {
     const anchors = pane.querySelectorAll('.anchor-text');
     anchors.forEach(a => { clear(a); a.classList.add('empty');
       a.appendChild(document.createTextNode('(failed to load)')); });
+    const wsBody = pane.querySelector('.workspaces-body');
+    if (wsBody) {
+      clear(wsBody); wsBody.classList.add('empty');
+      wsBody.appendChild(document.createTextNode('(failed to load)'));
+    }
   }
 
   renderResume(s) {

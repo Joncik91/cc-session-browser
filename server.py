@@ -130,6 +130,14 @@ def scan_transcript(proj_path: str, sid: str) -> dict:
 
     counts = {"E": 0, "B": 0, "R": 0, "G": 0, "X": 0}
     files_touched: set[str] = set()
+    # Per-root edit/touch counter — top-level dir of every file written/edited.
+    # Roots are 2-segment slices (e.g. /home/joncik, /etc, /root) to match how
+    # humans think about "which project / area was being touched."
+    root_touch_counts: dict[str, int] = defaultdict(int)
+    # Distinct cwds seen across user messages, keyed by path → first-seen ms.
+    # Captures mid-session `cd` jumps so the detail pane can show every
+    # workspace the session moved through.
+    cwd_first_seen: dict[str, int] = {}
     in_tok = out_tok = 0
     transcript_chunks: list[str] = []
     # Last assistant text block — the closing reply the user actually reads.
@@ -150,6 +158,22 @@ def scan_transcript(proj_path: str, sid: str) -> dict:
                 msg = rec.get("message") or {}
                 role = msg.get("role")
                 content = msg.get("content")
+                # cwd is a top-level field on user records (the dir Claude was
+                # invoked from at the moment that prompt was sent). Track first-
+                # seen timestamp per distinct cwd.
+                rec_cwd = rec.get("cwd")
+                rec_ts = rec.get("timestamp")
+                if isinstance(rec_cwd, str) and rec_cwd and rec_cwd not in cwd_first_seen:
+                    # timestamp may be ISO string or epoch ms — normalise to ms.
+                    ts_ms = 0
+                    if isinstance(rec_ts, (int, float)):
+                        ts_ms = int(rec_ts) if rec_ts > 1e11 else int(rec_ts * 1000)
+                    elif isinstance(rec_ts, str):
+                        try:
+                            ts_ms = int(datetime.fromisoformat(rec_ts.replace("Z", "+00:00")).timestamp() * 1000)
+                        except Exception:
+                            ts_ms = 0
+                    cwd_first_seen[rec_cwd] = ts_ms
                 # Track the last NON-EMPTY assistant text block we saw.
                 if rec.get("type") == "assistant" and isinstance(content, list):
                     found_text = ""
@@ -173,6 +197,18 @@ def scan_transcript(proj_path: str, sid: str) -> dict:
                                 fp = inp.get("file_path") or inp.get("notebook_path")
                                 if fp:
                                     files_touched.add(fp)
+                                    # Bucket the path by its 2-segment prefix
+                                    # ("/home/joncik" from "/home/joncik/apps/x.py",
+                                    # "/etc" from "/etc/systemd/system/foo.service").
+                                    # Top-level dirs get themselves as the root.
+                                    parts = fp.split("/")
+                                    if len(parts) >= 3:
+                                        root = "/" + parts[1] + "/" + parts[2]
+                                    elif len(parts) >= 2:
+                                        root = "/" + parts[1]
+                                    else:
+                                        root = fp
+                                    root_touch_counts[root] += 1
                             elif name == "Bash":
                                 counts["B"] += 1
                             elif name == "Read":
@@ -199,6 +235,17 @@ def scan_transcript(proj_path: str, sid: str) -> dict:
     except Exception:
         return {"missing": False, "error": True}
 
+    # Cwds sorted by first-seen, drop empty paths, keep up to 8.
+    cwds_sorted = sorted(
+        ({"path": p, "first_seen_ms": ts} for p, ts in cwd_first_seen.items() if p),
+        key=lambda x: x["first_seen_ms"],
+    )[:8]
+    # Path roots sorted by edit count desc, top 8 — enough for any realistic
+    # session to show which areas of the filesystem got touched.
+    roots_sorted = sorted(
+        ({"root": r, "edits": c} for r, c in root_touch_counts.items()),
+        key=lambda x: x["edits"], reverse=True,
+    )[:8]
     summary = {
         "missing": False,
         "mtime": mtime,
@@ -209,6 +256,8 @@ def scan_transcript(proj_path: str, sid: str) -> dict:
         "output_tokens": out_tok,
         "transcript_text": "\n".join(transcript_chunks)[:200_000],  # cap memory
         "last_assistant_text": last_assistant_text,
+        "cwds": cwds_sorted,
+        "path_roots": roots_sorted,
     }
     _transcript_cache[sid] = (mtime, summary)
     return summary
@@ -520,11 +569,15 @@ def api_session_detail(sid: str, limit: int = 30):
                 last_assistant = found_text
                 break  # stop at the first assistant entry with real text content
 
+    # Pull cwds + path_roots from the cached transcript scan (no second pass).
+    scan = scan_transcript(s["proj_path"], sid)
     return {
         "sid": sid,
         "first_user_prompt": first_user[:2000],
         "last_assistant_text": last_assistant[:2000],
         "messages": msgs,
+        "cwds": scan.get("cwds", []) if not scan.get("missing") else [],
+        "path_roots": scan.get("path_roots", []) if not scan.get("missing") else [],
     }
 
 
